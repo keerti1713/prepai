@@ -30,40 +30,41 @@ export const CreateNewUser = inngest.createFunction(
 )
 
 export const GenerateNotes = inngest.createFunction(
-    { id: "generate-course" },
+    { id: "generate-course", concurrency: 5 }, 
     { event: "notes.generate" },
     async ({ event, step }) => {
-        const {course}=event.data;
+        const { course } = event.data;
 
-        //generate notes for each chapter
-        const notesResult=await step.run('Generate Chapter Notes',async()=>{
-            const Chapters=course?.courseLayout?.chapters;
+        await db.update(STUDY_MATERIAL_TABLE).set({ status: "Processing" })
+            .where(eq(STUDY_MATERIAL_TABLE.courseId, course?.courseId));
+
+        const notesResult = await step.run("Generate Chapter Notes", async () => {
+            const Chapters = course?.courseLayout?.chapters;
             const chapterPromises = Chapters.map(async (chapter, index) => {
-                const PROMPT = 'Generate detailed content for each chapter, ensuring all listed topics are thoroughly covered. Provide the content in HTML format (but exclude the HTML, head, body, title tag), the chapters:' + JSON.stringify(chapter);
+                const PROMPT = "Generate detailed content for each chapter..." + JSON.stringify(chapter);
                 const result = await generateNotesAiModel.sendMessage(PROMPT);
                 const aiResp = result.response.text();
 
                 await db.insert(CHAPTER_NOTES_TABLE).values({
                     chapterId: index,
                     courseId: course?.courseId,
-                    notes: aiResp
+                    notes: aiResp,
                 });
             });
 
             await Promise.all(chapterPromises);
-            
-            return 'Completed'
-        })
-        //update status to ready
-        const updateCourseStatus=await step.run('Update Course Status', async()=>{
-            const result=await db.update(STUDY_MATERIAL_TABLE).set({
-                status:'Ready'
-            }).where(eq(STUDY_MATERIAL_TABLE.courseId, course?.courseId))
-            return 'Success'
+            return "Completed";
         });
 
+        // Update course status when done
+        await db.update(STUDY_MATERIAL_TABLE).set({ status: "Ready" })
+            .where(eq(STUDY_MATERIAL_TABLE.courseId, course?.courseId));
+
+        return "Success"; 
     }
-)
+);
+
+    
 // generate the study type content
 
 
